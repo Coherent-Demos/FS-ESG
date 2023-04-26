@@ -119,7 +119,7 @@ def defineInputTables():
 
     return envweights_df, controversial_flags, socweights_df, govweights_df, esgweights_df
 
-tab1, tab2, tab3, tab4 = st.tabs(['ESG Analyser', 'ESG Preferencial Screener', 'Custom Weight ESG', 'Portfolio Analytics'])
+tab1, tab2, tab3, tab4 = st.tabs(['Company Risk Profiles', 'Risk Preferencial Screener', 'Custom Weight Risk Scoring', 'Portfolio Analytics'])
 
 @st.cache_data
 def runAggregation():
