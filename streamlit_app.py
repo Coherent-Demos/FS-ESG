@@ -334,7 +334,7 @@ with tab2:
 
 
     st.subheader('Screen for companies that match a selected combination of ESG filters')
-    st.data_editor(controversial_flags)
+    st.experimental_data_editor(controversial_flags)
         
     button = st.button('Run Preferencial Screening', type='primary')
 
