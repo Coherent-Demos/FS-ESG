@@ -11,9 +11,31 @@ import get_ticker_data as Yahoo
 
 
 @st.cache_data
-def callSparkModel(Xinput_controversial_flags, Xinput_environmental_weights, Xinput_governance_weights, Xinput_social_weights, Xinput_esg_weights):
+def callSparkModel(Xinput_controversial_flags, Xinput_environmental_weights, Xinput_governance_weights, Xinput_social_weights, Xinput_esg_weights, Xinput_TargetScore):
 
-    url = "https://excel.staging.coherent.global/coherent/api/v3/folders/ESG%20Investment%20Screening/services/ESG%20Screening%20and%20Analysis/execute"
+    # url = "https://excel.staging.coherent.global/coherent/api/v3/folders/ESG%20Investment%20Screening/services/ESG%20Screening%20and%20Analysis/execute"
+
+    # payload = json.dumps({
+    #    "request_data": {
+    #       "inputs": {
+    #          "ControversialActivites_Flags": Xinput_controversial_flags,
+    #          "EnvironmentalScores_Weighting": Xinput_environmental_weights,
+    #          "GovernanceScores_Weighting": Xinput_governance_weights, 
+    #          "SocialScore_Weighting": Xinput_social_weights,
+    #          "CustomESGWeights": Xinput_esg_weights
+    #       }
+    #    },
+    #     "request_meta": {
+    #         "compiler_type": "Neuron",
+    #     }
+    # })
+    # headers = {
+    #    'Content-Type': 'application/json',
+    #    'x-tenant-name': 'coherent',
+    #    'x-synthetic-key': 'facaae76-30e7-4201-9cc7-683dd3a751c6'
+    # }
+
+    url = "https://excel.uat.us.coherent.global/coherent/api/v3/folders/Spark FE Demos/services/ESG Screening and Analysis v2/Execute"
 
     payload = json.dumps({
        "request_data": {
@@ -22,7 +44,8 @@ def callSparkModel(Xinput_controversial_flags, Xinput_environmental_weights, Xin
              "EnvironmentalScores_Weighting": Xinput_environmental_weights,
              "GovernanceScores_Weighting": Xinput_governance_weights, 
              "SocialScore_Weighting": Xinput_social_weights,
-             "CustomESGWeights": Xinput_esg_weights
+             "CustomESGWeights": Xinput_esg_weights,
+             "TargetScore": Xinput_TargetScore
           }
        },
         "request_meta": {
@@ -32,7 +55,7 @@ def callSparkModel(Xinput_controversial_flags, Xinput_environmental_weights, Xin
     headers = {
        'Content-Type': 'application/json',
        'x-tenant-name': 'coherent',
-       'x-synthetic-key': 'facaae76-30e7-4201-9cc7-683dd3a751c6'
+       'SecretKey': '2277565c-9fad-4bf4-ad2b-1efe5748dd11'
     }
 
 
@@ -61,6 +84,94 @@ def callESGFactorModel():
     response = requests.request("POST", url, headers=headers, data=payload, allow_redirects=False)
     outputs = json.loads(response.text)['response_data']['outputs']
     return outputs
+
+def process_series(series_a, series_b):
+    series_back = []
+    series_front = []
+
+    for a_item, b_item in zip(series_a, series_b):
+        x = a_item["value"]
+        y = b_item["value"]
+
+        if x > y:
+            back_value = x
+            front_value = y
+            back_color = '#FF005C'
+            front_color = '#EFEFEF'
+        else:
+            back_value = y
+            front_value = x
+            back_color = '#00D37A'
+            front_color = '#EFEFEF'
+        
+        series_back.append({'name': a_item["name"], 'value': back_value, 'color': back_color})
+        series_front.append({'name': a_item["name"], 'value': front_value, 'color': front_color})
+
+    return series_back, series_front
+
+def generatePortfolioChart(dataframe, portfoliofocus):
+
+    columns_to_rename_a = {
+        "Economic Sector": "name",
+        "Portfolio Breakdown": "value"
+    }
+    # Extract specific columns
+    selected_columns_df = dataframe[list(columns_to_rename_a.keys())]
+    # Rename the extracted columns
+    selected_columns_df = selected_columns_df.rename(columns=columns_to_rename_a)
+    # Convert the selected columns DataFrame to a JSON array
+    series_a = selected_columns_df.to_json(orient="records")
+
+
+    columns_to_rename_b = {
+        "Economic Sector": "name"
+    }
+    columns_to_rename_b[portfoliofocus] = "value"
+    # Extract specific columns
+    selected_columns_df = dataframe[list(columns_to_rename_b.keys())]
+    # Rename the extracted columns
+    selected_columns_df = selected_columns_df.rename(columns=columns_to_rename_b)
+    # Convert the selected columns DataFrame to a JSON array
+    series_b = selected_columns_df.to_json(orient="records")
+
+    series_back, series_front = process_series(json.loads(series_a), json.loads(series_b))
+
+    fig = go.Figure()
+
+    for back_item, front_item in zip(series_back, series_front):
+        fig.add_trace(go.Bar(
+            y=[back_item['name']],
+            x=[back_item['value']],
+            orientation='h',
+            marker_color=back_item['color'],
+            offsetgroup=0,
+            showlegend=False
+        ))
+
+        fig.add_trace(go.Bar(
+            y=[front_item['name']],
+            x=[front_item['value']],
+            orientation='h',
+            marker_color=front_item['color'],
+            offsetgroup=1,
+            showlegend=False
+        ))
+
+    fig.update_layout(
+        barmode='overlay',
+        yaxis=dict(categoryorder='total ascending'),
+        xaxis_title='% of Portfolio',
+        yaxis_title='',
+        height=800,
+        margin=dict(t=0)
+    )
+
+    return fig
+
+def getNewESGScore(portfoliofocus):
+
+    total_sum = sum(obj["Modified Weight"] * obj["Modified Score"] for obj in portfoliofocus)
+    return total_sum
 
 
 @st.cache_data
@@ -126,6 +237,11 @@ def runAggregation():
     esg_factors = callESGFactorModel()
     esg_df = pd.DataFrame(esg_factors['aggregatedESGFactors'])
     return esg_df
+
+#initialize
+customESGScore = 0
+PortfolioAnalysis_Chart_df = pd.DataFrame([{}])
+Xinput_TargetScore = 30
 
 with tab1:
 
@@ -218,13 +334,13 @@ with tab2:
 
 
     st.subheader('Screen for companies that match a selected combination of ESG filters')
-    st.experimental_data_editor(controversial_flags)
+    st.data_editor(controversial_flags)
         
     button = st.button('Run Preferencial Screening', type='primary')
 
     if button:
         
-        response = callSparkModel(controversial_flags.to_dict('records'), envweights_df.to_dict('records'), govweights_df.to_dict('records'), socweights_df.to_dict('records'), esgweights_df.to_dict('records'))
+        response = callSparkModel(controversial_flags.to_dict('records'), envweights_df.to_dict('records'), govweights_df.to_dict('records'), socweights_df.to_dict('records'), esgweights_df.to_dict('records'), Xinput_TargetScore)
         outputs = json.loads(response.text)['response_data']['outputs']
         
         Non_Controversial_Assets_df = pd.DataFrame(outputs['Non_Controversial_Assets'])
@@ -255,18 +371,18 @@ with tab3:
     
     weighting_inputs = st.selectbox('Select Weighting Rules:', ['Environmental Factor Weights', 'Social Factor Weights', 'Governance Factor Weights', 'Overall ESG Weights'])
     if weighting_inputs == 'Environmental Factor Weights':
-        st.experimental_data_editor(envweights_df)
+        st.data_editor(envweights_df)
     elif weighting_inputs == 'Social Factor Weights':
-        st.experimental_data_editor(socweights_df)
+        st.data_editor(socweights_df)
     elif weighting_inputs == 'Governance Factor Weights':
-        st.experimental_data_editor(govweights_df)
+        st.data_editor(govweights_df)
     elif weighting_inputs == 'Overall ESG Weights':
-        st.experimental_data_editor(esgweights_df)
+        st.data_editor(esgweights_df)
 
     button = st.button('Calculate Custom ESG Scores', type='primary')
 
     if button:
-        response = callSparkModel(controversial_flags.to_dict('records'), envweights_df.to_dict('records'), govweights_df.to_dict('records'), socweights_df.to_dict('records'), esgweights_df.to_dict('records'))
+        response = callSparkModel(controversial_flags.to_dict('records'), envweights_df.to_dict('records'), govweights_df.to_dict('records'), socweights_df.to_dict('records'), esgweights_df.to_dict('records'), Xinput_TargetScore)
         outputs = json.loads(response.text)['response_data']['outputs']
 
         CustomScoringBreakdown_df = pd.DataFrame(outputs['CustomScoringBreakdown'])
@@ -312,58 +428,89 @@ with tab3:
         g_fig.update_layout(barmode='group')
         st.plotly_chart(g_fig, use_container_width=True)
 
-# with tab4:
-#     if button:
+with tab4:
+    st.write('### Optimize your Portfolio to Achieve Your target ESG Score')
+    st.text("‎")
 
-#         overview, esgScore, gcScore, tempScore, companies = st.tabs(['Overview', 'ESG Scores', 'GC Scores', 'Temp. Score', 'Companies'])
-#         assets_df = EnvironmentalWeightedPortfolio_df
+    col41, col42 = st.columns([3,9])
+    with col41:
+        with st.form("DC Form"):
+            st.write("**Set your target score**")
+            CurrentScoreValue = customESGScore if customESGScore else 60
+            CurrentScore = st.metric("Current Portfolio Score", value=CurrentScoreValue)
+            st.write('***')
+            Xinput_TargetScore = st.number_input("Target Portfolio Score", min_value=30, value=CurrentScoreValue + 5)
+            PortfolioFocus = st.selectbox('Portfolio Focus', ['Technology', 'Energy', 'Consumer'])
+            st.markdown(
+              """
+              <style>
+              .stButton>button {
+                  background-color: blue;
+                  color: white;
+                  margin-top: 12px
+              }
+              .stButton>button:hover {
+                  color: white;
+              }
+              .stButton>button:active {
+                  color: white;
+              }
+              .stButton>button:focus {
+                  color: white;
+              }
+              </style>
+              """,
+              unsafe_allow_html=True
+            )
 
-#         with overview:
-#             col1, col2, col3, col4, col5 = st.columns(5)
-            
-#             with col1:
-#                 st.metric('Average ESG Score', round(assets_df['ESG'].mean(), 2))            
-#             with col2:
-#                 st.metric('Average ESG E Score', round(assets_df['ESG_E'].mean(), 2))
-#             with col3:
-#                 st.metric('Average ESG S Score', round(assets_df['ESG_S'].mean(), 2))
-#             with col4:
-#                 st.metric('Average ESG G Score', round(assets_df['ESG_G'].mean(), 2))
-#             with col5:
-#                 st.metric('Average Custom Weighted ESG E Score', round(assets_df['ESG WEIGHTED ENVIRONMENT SCORE'].mean(), 2))
-            
-#             port_fig = px.bar(x=Portfolio_SectorBreakdown_df['Portfolio Economic Sectors'], y=Portfolio_SectorBreakdown_df['Environmental Score Screened Assets'], 
-#             title="Economic Sector Breakdown", text=Portfolio_SectorBreakdown_df['Environmental Score Screened Assets'], 
-#             labels={'x':'Economic Sectors', 'y':'# of Assets'}, height=700)
-#             port_fig.update_traces(texttemplate='%{text:.0s}', textposition='outside')
-#             st.plotly_chart(port_fig, use_container_width=True)
-        
-#         with esgScore:
-#             col1, col2 = st.columns(2)
-#             with col1:
-#                 esg_fig = px.histogram(assets_df, x=assets_df['ESG'].astype(int), nbins=50, title='ESG Score Distribution')
-#                 st.plotly_chart(esg_fig)
-#                 esgE_fig = px.histogram(assets_df, x=assets_df['ESG_E'].astype(int), nbins=50, title='ESG Environment Score Distribution')
-#                 st.plotly_chart(esgE_fig)
+            DCbutton_clicked = st.form_submit_button("Optimize Portfolio", use_container_width=True)
+            if DCbutton_clicked:
+                response = callSparkModel(controversial_flags.to_dict('records'), envweights_df.to_dict('records'), govweights_df.to_dict('records'), socweights_df.to_dict('records'), esgweights_df.to_dict('records'), Xinput_TargetScore)
+                outputs = json.loads(response.text)['response_data']['outputs']
 
-#             with col2:
-#                 esgS_fig = px.histogram(assets_df, x=assets_df['ESG_S'].astype(int), nbins=50, title='ESG Social Score Distribution')
-#                 st.plotly_chart(esgS_fig)
-#                 esgG_fig = px.histogram(assets_df, x=assets_df['ESG_G'].astype(int), nbins=50, title='ESG Governance Score Distribution')
-#                 st.plotly_chart(esgG_fig)
+                economic_sectors = [item["Economic Sector"] for item in outputs["CustomScoringBreakdown"]]
+                portfolio_breakdowns = [item["Portfolio Breakdown"] for item in outputs["CustomScoringBreakdown"]]
+                energy_new_breakdown = [item["Modified Weight"] for item in outputs["Energy"]]
+                technology_new_breakdown = [item["Modified Weight"] for item in outputs["Technology"]]
+                consumer_new_breakdown = [item["Modified Weight"] for item in outputs["Consumer"]]
 
-#         with gcScore:
-#             col1, col2 = st.columns(2)
-#             with col1:
-#                 gc_fig = px.histogram(assets_df, x=assets_df['GC_SCORE'].astype(int), nbins=50, title='Global Compact Score Distribution')
-#                 st.plotly_chart(gc_fig)
-#                 gcHR_fig = px.histogram(assets_df, x=assets_df['GC_HUMAN_RIGHTS'].astype(int), nbins=50, title='Global Compact Human Rights Score Distribution')
-#                 st.plotly_chart(gcHR_fig)
-#                 gcAC_fig = px.histogram(assets_df, x=assets_df['GC_ANTI_CORRUPTION'].astype(int), nbins=50, title='Global Compact Anti-Corruption Score Distribution')
-#                 st.plotly_chart(gcAC_fig)
+                PortfolioAnalysis_Chart_df = pd.DataFrame({
+                    "Economic Sector": economic_sectors,
+                    "Portfolio Breakdown": portfolio_breakdowns,
+                    "Energy": energy_new_breakdown,
+                    "Technology": technology_new_breakdown,
+                    "Consumer": consumer_new_breakdown,
+                })
+    with col42:
+        with st.expander("**Portfolio Breakdown**", expanded=True):
 
-#             with col2:
-#                 gcLR_fig = px.histogram(assets_df, x=assets_df['GC_LABOUR_RIGHTS'].astype(int), nbins=50, title='Global Compact Labour Rights Score Distribution')
-#                 st.plotly_chart(gcLR_fig)
-#                 gcE_fig = px.histogram(assets_df, x=assets_df['GC_ENVIRONMENT'].astype(int), nbins=50, title='Global Compact Environment Score Distribution')
-#                 st.plotly_chart(gcE_fig)                    
+            col14, col15, col16 = st.columns([1,1,1])
+            with col14:
+                NEW_ESG_Score = st.empty()
+            st.write('***')
+
+            PortfolioChart_placeholder = st.empty()
+
+            response = callSparkModel(controversial_flags.to_dict('records'), envweights_df.to_dict('records'), govweights_df.to_dict('records'), socweights_df.to_dict('records'), esgweights_df.to_dict('records'), Xinput_TargetScore)
+            outputs = json.loads(response.text)['response_data']['outputs']
+
+            economic_sectors = [item["Economic Sector"] for item in outputs["CustomScoringBreakdown"]]
+            portfolio_breakdowns = [item["Portfolio Breakdown"] for item in outputs["CustomScoringBreakdown"]]
+            energy_new_breakdown = [item["Modified Weight"] for item in outputs["Energy"]]
+            technology_new_breakdown = [item["Modified Weight"] for item in outputs["Technology"]]
+            consumer_new_breakdown = [item["Modified Weight"] for item in outputs["Consumer"]]
+
+            PortfolioAnalysis_Chart_df = pd.DataFrame({
+                "Economic Sector": economic_sectors,
+                "Portfolio Breakdown": portfolio_breakdowns,
+                "Energy": energy_new_breakdown,
+                "Technology": technology_new_breakdown,
+                "Consumer": consumer_new_breakdown,
+            })
+
+            NEW_ESG_Score_value = getNewESGScore(outputs[PortfolioFocus])
+
+            PortfolioChartFig = generatePortfolioChart(PortfolioAnalysis_Chart_df, PortfolioFocus)
+            PortfolioChart_placeholder.plotly_chart(PortfolioChartFig, use_container_width=True)
+            NEW_ESG_Score.metric("New Portfolio Score", round(NEW_ESG_Score_value, 2))
+
