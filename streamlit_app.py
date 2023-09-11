@@ -371,13 +371,13 @@ with tab3:
     
     weighting_inputs = st.selectbox('Select Weighting Rules:', ['Environmental Factor Weights', 'Social Factor Weights', 'Governance Factor Weights', 'Overall ESG Weights'])
     if weighting_inputs == 'Environmental Factor Weights':
-        st.data_editor(envweights_df)
+        st.experimental_data_editor(envweights_df)
     elif weighting_inputs == 'Social Factor Weights':
-        st.data_editor(socweights_df)
+        st.experimental_data_editor(socweights_df)
     elif weighting_inputs == 'Governance Factor Weights':
-        st.data_editor(govweights_df)
+        st.experimental_data_editor(govweights_df)
     elif weighting_inputs == 'Overall ESG Weights':
-        st.data_editor(esgweights_df)
+        st.experimental_data_editor(esgweights_df)
 
     button = st.button('Calculate Custom ESG Scores', type='primary')
 
